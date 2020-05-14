@@ -1,0 +1,23 @@
+name: ci
+on: [push, pull_request, release]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@master
+
+      - name: Start Postgres
+        run: docker-compose up -d postgres
+
+      - name: Build CI container
+        run: docker-compose build ci
+
+      - name: Cache dependencies
+        run: docker-compose run ci bash -c 'deno cache /app/test/*.ts'
+
+      - name: Run tests (all functionality)
+        run: docker-compose run ci
+
+      - name: Run tests (stable only)
+        run: docker-compose run -e SKIP_UNSTABLE=1 ci deno test -A /app/test

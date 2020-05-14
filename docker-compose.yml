@@ -1,0 +1,20 @@
+version: '3.7'
+services:
+    postgres:
+        build: docker/postgres
+        ports:
+            - 5433:5433
+        volumes:
+            - socket:/socket
+    ci:
+        build: docker/ci
+        volumes:
+            - .:/app
+            - ci_cache:/root/.cache
+            - socket:/socket
+        command: deno test -A --unstable /app/test
+        depends_on:
+            - postgres
+volumes:
+    ci_cache:
+    socket:
