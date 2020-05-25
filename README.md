@@ -1,11 +1,19 @@
 # pgc4d - PostgreSQL client for Deno
 
+<a href="https://github.com/jakajancar/pgc4d/releases">
+    <img alt="release" src="https://badgen.net/github/release/jakajancar/pgc4d/stable">
+</a>
+
 <a href="https://github.com/jakajancar/pgc4d/actions?query=workflow%3Aci">
-    <img src="https://github.com/jakajancar/pgc4d/workflows/ci/badge.svg" alt="ci">
+    <img alt="ci" src="https://badgen.net/github/checks/jakajancar/pgc4d?label=ci&icon=github">
 </a>
 
 <a href="https://doc.deno.land/https/raw.githubusercontent.com/jakajancar/pgc4d/master/src/mod.ts">
-    <img src="https://doc.deno.land/badge.svg" alt="deno doc">
+    <img alt="deno doc" src="https://badgen.net/badge/doc/deno/557AAC">
+</a>
+
+<a href="https://github.com/jakajancar/pgc4d/blob/master/LICENSE">
+    <img alt="license" src="https://badgen.net/github/license/jakajancar/pgc4d">
 </a>
 
 A full-featured PostgreSQL client for [Deno](https://deno.land) including support for:
