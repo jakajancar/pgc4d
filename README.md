@@ -4,6 +4,10 @@
     <img src="https://github.com/jakajancar/pgc4d/workflows/ci/badge.svg" alt="ci">
 </a>
 
+<a href="https://doc.deno.land/https/raw.githubusercontent.com/jakajancar/pgc4d/master/src/mod.ts">
+    <img src="https://doc.deno.land/badge.svg" alt="deno doc">
+</a>
+
 A full-featured PostgreSQL client for [Deno](https://deno.land) including support for:
 
   - Connectivity using TCP, SSL* and Unix domain sockets*
@@ -31,7 +35,9 @@ try {
 
 ## Documentation
 
-Please see the [wiki](https://github.com/jakajancar/pgc4d/wiki).
+[API documentation](https://doc.deno.land/https/raw.githubusercontent.com/jakajancar/pgc4d/master/src/mod.ts)
+
+[Manual](https://github.com/jakajancar/pgc4d/wiki)
 
 ## Contributing
 
