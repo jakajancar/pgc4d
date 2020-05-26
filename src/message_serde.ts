@@ -1,6 +1,6 @@
 // https://www.postgresql.org/docs/current/protocol-message-types.html
 
-import { ServerMessage, ClientMessage, TransactionStatus, PgErrorOrNotice, PgErrorFields, PgNotice } from './message_types.ts'
+import { ServerMessage, ClientMessage, TransactionStatus, ErrorAndNoticeFields } from './message_types.ts'
 import { BufReader, BufWriter, unreachable, assert, unimplemented, encode, decode } from './deps.ts'
 
 export async function readMessage(reader: BufReader): Promise<ServerMessage> {
@@ -37,15 +37,19 @@ export async function readMessage(reader: BufReader): Promise<ServerMessage> {
         return Array.from({length: int16()}).map(f)
     }
 
-    function readErrorOrNotice(): PgErrorOrNotice {
+    function readErrorOrNotice<T extends string>(expectedSeverities: T[]): ErrorAndNoticeFields & { severity: T } {
         const map = new Map<string, string>()
         let key
         while ((key = decode(byten(1))) !== '\0')
             map.set(key, string())
 
+        const severity = map.get('V')
+        if (!isOneOf(severity, expectedSeverities))
+            throw new Error('Unexpected severity: ' + severity)
+
         return {
+            severity,
             severityLocal:      map.get('S')!,
-            severity:           map.get('V')!,
             code:               map.get('C')!,
             message:            map.get('M')!,
             detail:             map.get('D'),
@@ -90,8 +94,8 @@ export async function readMessage(reader: BufReader): Promise<ServerMessage> {
                         return byten(length)
                 }) }
             case 'I': return { type: 'EmptyQueryResponse' }
-            case 'E': return { type: 'ErrorResponse', error: readErrorOrNotice() as PgErrorFields }
-            case 'N': return { type: 'NoticeResponse', notice: readErrorOrNotice() as PgNotice }
+            case 'E': return { type: 'ErrorResponse', fields: readErrorOrNotice(['ERROR', 'FATAL', 'PANIC']) }
+            case 'N': return { type: 'NoticeResponse', fields: readErrorOrNotice(['WARNING', 'NOTICE', 'DEBUG', 'INFO', 'LOG']) }
             case 'n': return { type: 'NoData' }
             case 'A': return { type: 'NotificationResponse', sender: int32(), channel: string(), payload: string() }
             case 't': return { type: 'ParameterDescription', typeOids: array(() => int32()) }
@@ -230,4 +234,8 @@ export async function writeMessage(writer: BufWriter, msg: ClientMessage): Promi
     await writer.write(size)
     for (let part of bodyParts)
         await writer.write(part)
+}
+
+function isOneOf<T>(x: unknown, allowedValues: T[]): x is T  {
+    return allowedValues.includes(x as any)
 }

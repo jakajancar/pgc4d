@@ -5,21 +5,37 @@ import { Deferred, Pipe, hashMd5Password } from './utils.ts'
 import { PreparedStatement } from './prepared_statement.ts'
 import { StreamingQueryResult, BufferedQueryResult } from './query_result.ts'
 import { ConnectPgOptions, computeOptions } from './connect_options.ts'
-import { PgError } from './types.ts'
+import { PgError, ColumnValue } from './types.ts'
 import { TypeRegistry } from './data_type_registry.ts'
 
 export interface PgConn extends Deno.Closer {
+    /** Process ID of the server process attached to the current session.
+     * Same as the number returned by `pg_backend_pid()` function using SQL.*/
     readonly pid: number
+
+    /** The current setting of server parameters such as `client_encoding`
+     * or `DateStyle`. */
     readonly serverParams: Map<string, string>
     
     /** Resolved when connection is closed, with Error if due to a problem, or
      *  undefined if due to close() being called. Never rejects. */
     readonly done: Promise<Error | undefined>
 
-    query(text: string, params?: any[]): Promise<BufferedQueryResult>
-    queryStreaming(text: string, params?: any[]): Promise<StreamingQueryResult>
+    /** Executes a query and returns a buffered result once all the rows are received. */
+    query(text: string, params?: ColumnValue[]): Promise<BufferedQueryResult>
+
+    /** Executes a query and returns a streaming result as soon as the query
+     * has been accepted by the server. Rows will be retrieved as you consume them. */
+    queryStreaming(text: string, params?: ColumnValue[]): Promise<StreamingQueryResult>
+
+    /** Creates a prepared statement on the server which you can later execute
+     * several times using different parameter values. Should offer improved
+     * performance compared to executing completely independent queries.*/
     prepare(text: string): Promise<PreparedStatement>
     
+    /** pgc4d loads the `pg_type` table to obtain the definitions of user-defined types.
+     * You can call `reloadTypes()` after doing e.g. `CREATE TYPE ... AS ENUM` to
+     * have the type recognized without re-connecting. */
     reloadTypes(): Promise<void>
 
     /** Closes immediately, killing any queries in progress. They will reject.
@@ -27,6 +43,23 @@ export interface PgConn extends Deno.Closer {
     close(): void
 }
 
+/**
+ * Opens a new connection to a PostgreSQL server and resolves to the connection
+ * (`PgConn`) once authenticated and ready to accept queries.
+ * 
+ * Usage:
+ * 
+ * ```ts
+ * const db1 = await connectPg('postgres://username:password@hostname/database', { ... more opts ... });
+ * const db2 = await connectPg({ hostname, username, password, database });
+ * const db3 = await connectPg({ transport: 'unix', path: '/foo/bar.sock', username });
+ * ```
+ *
+ * Requirements:
+ *   - tcp with ssl (default) requires `--allow-net` and `--unstable`
+ *   - tcp without ssl requires `--allow-net`
+ *   - unix requires `--allow-read` and `--unstable`
+ */
 export async function connectPg(url: string, options?: ConnectPgOptions): Promise<PgConn>
 export async function connectPg(options: ConnectPgOptions): Promise<PgConn>
 export async function connectPg(...args: any[]): Promise<PgConn>
@@ -128,7 +161,7 @@ export class PgConnImpl implements PgConn {
                         this.serverParams.set(msg.name, msg.value)
                         break
                     case 'NoticeResponse':
-                        await this._options.onNotice(msg.notice)
+                        await this._options.onNotice(msg.fields)
                         break
                     case 'NotificationResponse':
                         await this._options.onNotification({channel: msg.channel, payload: msg.payload, sender: msg.sender})
@@ -142,8 +175,8 @@ export class PgConnImpl implements PgConn {
                         this._turns.write()
                         break
                     default:
-                        if (msg.type === 'ErrorResponse' && (msg.error.severity === 'FATAL' || msg.error.severity === 'PANIC')) {
-                            this.done.resolve(new PgError(msg.error))
+                        if (msg.type === 'ErrorResponse' && (msg.fields.severity === 'FATAL' || msg.fields.severity === 'PANIC')) {
+                            this.done.resolve(new PgError(msg.fields))
                         }
 
                         // await, to buffer at most one
@@ -160,9 +193,9 @@ export class PgConnImpl implements PgConn {
     async _readSync(): Promise<ServerMessage> {
         const msg = await this._syncMessage.read()
         if (msg.type === 'ErrorResponse') {
-            if (msg.error.severity !== 'FATAL' && msg.error.severity !== 'PANIC')
+            if (msg.fields.severity !== 'FATAL' && msg.fields.severity !== 'PANIC')
                 await this._write([{ type: 'Sync' }])
-            throw new PgError(msg.error)
+            throw new PgError(msg.fields)
         }
         return msg
     }

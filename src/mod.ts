@@ -8,7 +8,7 @@ export {
 } from './connection.ts'
 
 export {
-    PgNotice,
+    ErrorAndNoticeFields,
 } from './message_types.ts'
 
 export {
@@ -25,6 +25,7 @@ export {
 export {
     Notification,
     PgError,
+    PgNotice,
     ColumnMetadata,
     ParameterMetadata,
     ColumnValue,

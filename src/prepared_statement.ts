@@ -1,7 +1,7 @@
 import { Format } from './message_types.ts'
 import { PgConnImpl, assertType } from './connection.ts'
 import { ParameterMetadata, ColumnMetadata, ColumnValue, IndexedRow } from './types.ts'
-import { assert, unreachable, assertEquals } from './deps.ts'
+import { assert } from './deps.ts'
 import { StreamingQueryResult, BufferedQueryResult, CompletionInfo } from './query_result.ts'
 
 export class PreparedStatement {
@@ -12,10 +12,13 @@ export class PreparedStatement {
         public readonly columns: ColumnMetadata[]
     ) {}
 
+    /** Executes the prepared statement and returns a buffered result once all the rows are received. */
     async execute(params: ColumnValue[] = []): Promise<BufferedQueryResult> {
         return (await this.executeStreaming(params)).buffer()
     }
 
+    /** Executes the prepared statement and returns a streaming result as soon as the query
+     * has been accepted by the server. Rows will be retrieved as you consume them. */
     async executeStreaming(params: ColumnValue[] = []): Promise<StreamingQueryResult> {
         await this._db._turns.read()
         return await this._executeStreamingWithoutWaitingForTurn(params)

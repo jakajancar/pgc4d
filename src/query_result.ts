@@ -1,6 +1,7 @@
 import { assert } from './deps.ts'
 import { ColumnMetadata, ColumnValue, IndexedRow, KeyedRow } from './types.ts'
 
+/** Query metadata received at the end of execution of a query. */
 export interface CompletionInfo {
     /**
      * For an INSERT command, rows is the number of rows inserted.
@@ -15,7 +16,7 @@ export interface CompletionInfo {
     numAffectedRows?: number
 }
 
-/** Abstract superclass of streaming and buffered results */
+/** Abstract superclass of streaming and buffered results. */
 export abstract class QueryResult {
     constructor(
         public readonly columns: ColumnMetadata[]
@@ -60,7 +61,7 @@ export abstract class QueryResult {
  * response object and either `next()` called enough times to reach
  * `done: true` or `return()`/`throw()` called to cancel the query.
  * 
- * for-await-of loop handles this for you automatically.
+ * The `for-await-of` loop handles this for you automatically.
  */
 export class StreamingQueryResult extends QueryResult {
     private _unconsumed?: AsyncGenerator<IndexedRow, CompletionInfo>
@@ -81,6 +82,7 @@ export class StreamingQueryResult extends QueryResult {
         }).call(this)
     }
 
+    /** Reads the result to completion and returns a `BufferedQueryResult`. */
     async buffer(): Promise<BufferedQueryResult> {
         const buffer: IndexedRow[] = []
         for await (const row of this.indexedRowsIterator) {
@@ -91,7 +93,9 @@ export class StreamingQueryResult extends QueryResult {
     }
 }
 
-
+/**
+ * A buffered query result that contains all the rows and `CompletionInfo`.
+ */
 export class BufferedQueryResult extends QueryResult {
     readonly indexedRows: IndexedRow[]
     readonly completionInfo: CompletionInfo

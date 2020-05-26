@@ -1,36 +1,41 @@
-import { Notification } from './types.ts'
-import { PgNotice } from './message_types.ts'
+import { Notification, PgNotice } from './types.ts'
 import { assert } from './deps.ts'
 
 export interface ConnectPgOptions {
+    /** Transport to use. Use 'tcp' for both unencrypted TCP as well as TLS ("SSL").
+     * Default: `tcp` */
     transport?: 'tcp' | 'unix',
 
-    /** A literal IP address or host name that can be resolved to an
-     * IP address. If not specified, defaults to `127.0.0.1`. */
+    /** A literal IP address or host name that can be resolved to an IP address.
+     * Default: `127.0.0.1`. */
     hostname?: string
 
-    /** The port to connect to. Defaults to 5432. */
+    /** When using transport `tcp`, the port to connect to.
+     * Default: 5432. */
     port?: number
 
+    /** When using transport `unix`, the filesystem path to the socket. */
     path?: string,
     
+    /** Username to use when connecting. Required. */
     username?: string
 
-    /** Required for anything but trust auth method. */
+    /** Password to authenticate with. Required unless `trust` method is enabled server-side. */
     password?: string
 
-    /** Defaults to username */
+    /** Defaults to username. */
     database?: string
 
-    /** Only applies to tcp transport. Defaults to 'verify-full'.
-     * 'verify-full' requires deno to be run with --unstable.
-     * This means pgc4d requires --unstable by default, but hopefully
-     * not for long.
+    /** Only applies to tcp transport. Defaults to 'verify-full'. See:
      * https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
      */
     sslMode?: 'disable' | 'verify-full'
+
+    /** Path to the CA certificate to verify server's certificate against. */
     certFile?: string
 
+    /** Arbitrary connection parameters to send to the server, for example
+     * `application_name`. */
     connectionParams?: { [name: string]: string | undefined }
 
     /** Notice received from server.
@@ -42,7 +47,7 @@ export interface ConnectPgOptions {
     onNotification?: (n: Notification) => Promise<void>
 
     /** Log debugging messages using `console.log`.
-     *  Defaults to false. */
+     *  Default: false. */
     debug?: boolean
 }
 
@@ -57,7 +62,9 @@ export function computeOptions(url: string | undefined, options: ConnectPgOption
         port: 5432,
         sslMode: 'verify-full' as 'verify-full',
         connectionParams: {},
-        onNotice: async (notice: PgNotice) => { console.log(`${notice.severity}: ${notice.message}`) },
+        onNotice: async (notice: PgNotice) => {
+            console.log(`${notice.severity}: ${notice.message}`)
+        },
         onNotification: async () => {
             console.warn('Received notification, but no handler. Please pass `onNotification` option to `connectPg()`.')
         },
