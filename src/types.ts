@@ -44,5 +44,19 @@ export interface ColumnMetadata {
 }
 
 export type ColumnValue = any
+
+/** A row in the shape of a JavaScript array, without column names:
+ *
+ * ```ts
+ * [ 'John', 'Doe', 33 ]
+ * ```
+ */
 export type IndexedRow = ColumnValue[]
+
+/** A row in the shape of a JavaScript object, with column names as keys:
+ *
+ * ```ts
+ * { first_name: 'John', last_name: 'Doe', age: 33 }
+ * ```
+ */
 export type KeyedRow = { [key: string]: ColumnValue }
