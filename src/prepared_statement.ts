@@ -4,7 +4,19 @@ import { ParameterMetadata, ColumnMetadata, ColumnValue, IndexedRow } from './ty
 import { assert } from './deps.ts'
 import { StreamingQueryResult, BufferedQueryResult, CompletionInfo } from './query_result.ts'
 
-export class PreparedStatement {
+export interface PreparedStatement {
+    /** Executes the prepared statement and returns a buffered result once all the rows are received. */
+    execute(params?: ColumnValue[]): Promise<BufferedQueryResult>
+
+    /** Executes the prepared statement and returns a streaming result as soon as the query
+     * has been accepted by the server. Rows will be retrieved as you consume them. */
+    executeStreaming(params?: ColumnValue[]): Promise<StreamingQueryResult>
+
+    /** Release the prepared statement on the server. */
+    close(): Promise<void>
+}
+
+export class PreparedStatementImpl {
     constructor(
         private readonly _db: PgConnImpl,
         private readonly _name: string,
@@ -12,13 +24,10 @@ export class PreparedStatement {
         public readonly columns: ColumnMetadata[]
     ) {}
 
-    /** Executes the prepared statement and returns a buffered result once all the rows are received. */
     async execute(params: ColumnValue[] = []): Promise<BufferedQueryResult> {
         return (await this.executeStreaming(params)).buffer()
     }
 
-    /** Executes the prepared statement and returns a streaming result as soon as the query
-     * has been accepted by the server. Rows will be retrieved as you consume them. */
     async executeStreaming(params: ColumnValue[] = []): Promise<StreamingQueryResult> {
         await this._db._turns.read()
         return await this._executeStreamingWithoutWaitingForTurn(params)

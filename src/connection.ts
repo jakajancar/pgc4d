@@ -2,7 +2,7 @@ import { ServerMessage, ClientMessage } from './message_types.ts'
 import { readMessage, writeMessage } from './message_serde.ts'
 import { assert, assertEquals, BufReader, BufWriter } from './deps.ts'
 import { Deferred, Pipe, hashMd5Password } from './utils.ts'
-import { PreparedStatement } from './prepared_statement.ts'
+import { PreparedStatement, PreparedStatementImpl } from './prepared_statement.ts'
 import { StreamingQueryResult, BufferedQueryResult } from './query_result.ts'
 import { ConnectPgOptions, computeOptions } from './connect_options.ts'
 import { PgError, ColumnValue } from './types.ts'
@@ -260,7 +260,7 @@ export class PgConnImpl implements PgConn {
         assert(rowDescOrNoData.type === 'RowDescription' || rowDescOrNoData.type === 'NoData')
         const columns = rowDescOrNoData.type === 'RowDescription' ? rowDescOrNoData.fields : []
     
-        return new PreparedStatement(this, name, params, columns)
+        return new PreparedStatementImpl(this, name, params, columns)
     }
 
     async prepare(text: string) {
