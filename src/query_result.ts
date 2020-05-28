@@ -26,10 +26,12 @@ export abstract class QueryResult {
     abstract completionInfo: CompletionInfo | undefined
 
     get rowsIterator(): AsyncIterableIterator<KeyedRow> {
+        this._assertUniqueColumnNames()
         return mapAsyncIterator(this.indexedRowsIterator, this._toKeyedRow.bind(this))
     }
 
     get columnIterator(): AsyncIterableIterator<ColumnValue> {
+        this._assertSingleColumn()
         return mapAsyncIterator(this.indexedRowsIterator, this._toField.bind(this))
     }
 
@@ -37,19 +39,27 @@ export abstract class QueryResult {
         return !!this.completionInfo
     }
 
+    protected _assertUniqueColumnNames() {
+        if (new Set(this.columns.map(c => c.name)).size != this.columns.length)
+            throw new Error(`Cannot returned keyed rows because result columns are not uniquely named.`)
+    }
+
     protected _toKeyedRow(src: IndexedRow): KeyedRow {
+        assert(src.length === this.columns.length)
         const ret: KeyedRow = {}
         this.columns.forEach((column, index) => {
-            if (ret[column.name] !== undefined)
-                throw new Error(`Cannot returned keyed rows because result has two columns with name '${column.name}'. Consider renaming columns or using indexed rows.`)
             ret[column.name] = src[index]
         })
         return ret
     }
 
-    protected _toField(src: IndexedRow): ColumnValue {
+    protected _assertSingleColumn() {
         if (this.columns.length !== 1)
-            throw new Error(`Cannot return field/column because result has ${this.columns.length} colums.`)
+            throw new Error(`Expected result to have 1 column, got ${this.columns.length}.`)
+    }
+
+    protected _toField(src: IndexedRow): ColumnValue {
+        assert(src.length === this.columns.length)
         return src[0]
     }
 }
@@ -119,13 +129,13 @@ export class BufferedQueryResult extends QueryResult {
     get indexedRow(): IndexedRow                    { this._assertNumRows(1, 1); return this.indexedRows[0] }
     get maybeIndexedRow(): IndexedRow | undefined   { this._assertNumRows(0, 1); return this.indexedRows[0] }
 
-    get rows(): KeyedRow[]                          { return this.indexedRows.map(this._toKeyedRow.bind(this)) }
-    get row(): KeyedRow                             { return this._toKeyedRow(this.indexedRow) }
-    get maybeRow(): KeyedRow | undefined            { return this.indexedRow ? this._toKeyedRow(this.indexedRow) : undefined}
+    get rows(): KeyedRow[]                          { this._assertUniqueColumnNames(); return this.indexedRows.map(this._toKeyedRow.bind(this)) }
+    get row(): KeyedRow                             { this._assertUniqueColumnNames(); return this._toKeyedRow(this.indexedRow) }
+    get maybeRow(): KeyedRow | undefined            { this._assertUniqueColumnNames(); return this.maybeIndexedRow ? this._toKeyedRow(this.maybeIndexedRow) : undefined}
 
-    get column(): ColumnValue[]                     { return this.indexedRows.map(this._toField.bind(this)) }
-    get value(): ColumnValue                        { return this._toField(this.indexedRow) }
-    get maybeValue(): ColumnValue | undefined       { return this.indexedRow ? this._toField(this.indexedRow) : undefined}
+    get column(): ColumnValue[]                     { this._assertSingleColumn(); return this.indexedRows.map(this._toField.bind(this)) }
+    get value(): ColumnValue                        { this._assertSingleColumn(); return this._toField(this.indexedRow) }
+    get maybeValue(): ColumnValue | undefined       { this._assertSingleColumn(); return this.maybeIndexedRow ? this._toField(this.maybeIndexedRow) : undefined}
 }
 
 async function* arrayToAsyncIterator<T>(xs: T[]): AsyncIterableIterator<T> {
