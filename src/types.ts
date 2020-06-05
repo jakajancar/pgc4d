@@ -9,6 +9,8 @@ export interface Notification {
     sender: number
 }
 
+export type NotificationListener = (notification: Notification) => Promise<void>
+
 export interface PgError extends ErrorAndNoticeFields {
     severity: 'ERROR' | 'FATAL' | 'PANIC'
 }

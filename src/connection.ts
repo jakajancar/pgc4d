@@ -5,7 +5,7 @@ import { Deferred, Pipe, hashMd5Password } from './utils.ts'
 import { PreparedStatement, PreparedStatementImpl } from './prepared_statement.ts'
 import { StreamingQueryResult, BufferedQueryResult } from './query_result.ts'
 import { ConnectPgOptions, computeOptions } from './connect_options.ts'
-import { PgError, ColumnValue } from './types.ts'
+import { PgError, ColumnValue, NotificationListener } from './types.ts'
 import { TypeRegistry } from './data_type_registry.ts'
 
 export interface PgConn extends Deno.Closer {
@@ -16,7 +16,7 @@ export interface PgConn extends Deno.Closer {
     /** The current setting of server parameters such as `client_encoding`
      * or `DateStyle`. */
     readonly serverParams: Map<string, string>
-    
+
     /** Resolved when connection is closed, with Error if due to a problem, or
      *  undefined if due to close() being called. Never rejects. */
     readonly done: Promise<Error | undefined>
@@ -32,7 +32,19 @@ export interface PgConn extends Deno.Closer {
      * several times using different parameter values. Should offer improved
      * performance compared to executing completely independent queries.*/
     prepare(text: string): Promise<PreparedStatement>
-    
+
+    /** Adds a listener for a channel. If this is the first listener for the channel,
+     * issues a `LISTEN` query against the database. Returned promise resolves after
+     * the connection is confirmed to be subscribed. */
+    addListener(channel: string, listener: NotificationListener): Promise<void>
+
+    /** Removes a listener for a channel. Listener is removed immediately and will not
+     * receive any further events. If this is the last listener for the channel, issues
+     * an `UNLISTEN` query against the database. Returned promise resolves after
+     * the connection is unsubscribed if the last listener is being removed, immediately
+     * otherwise. */
+    removeListener(channel: string, listener: NotificationListener): Promise<void>
+
     /** pgc4d loads the `pg_type` table to obtain the definitions of user-defined types.
      * You can call `reloadTypes()` after doing e.g. `CREATE TYPE ... AS ENUM` to
      * have the type recognized without re-connecting. */
@@ -46,9 +58,9 @@ export interface PgConn extends Deno.Closer {
 /**
  * Opens a new connection to a PostgreSQL server and resolves to the connection
  * (`PgConn`) once authenticated and ready to accept queries.
- * 
+ *
  * Usage:
- * 
+ *
  * ```ts
  * const db1 = await connectPg('postgres://username:password@hostname/database', { ... more opts ... });
  * const db2 = await connectPg({ hostname, username, password, database });
@@ -111,7 +123,7 @@ export class PgConnImpl implements PgConn {
         this._runReadLoop()
         this._started = this._start()
     }
-    
+
     readonly serverParams = new Map<string, string>()
     readonly _writer: BufWriter = new BufWriter(this._conn)
     readonly _reader: BufReader = new BufReader(this._conn)
@@ -123,8 +135,13 @@ export class PgConnImpl implements PgConn {
     pid!: number         // set after _started
     _secretKey!: number  // set after _started
     _stmtCounter: number = 0
+    readonly _channels = new Map<string, {
+        listeners: Set<NotificationListener>,
+        subscribed: Deferred<void>
+    }>()
+
     readonly done = new Deferred<Error | undefined>()
-    
+
     // Write a message
     async _write(msgs: ClientMessage[]): Promise<void>
     {
@@ -163,9 +180,20 @@ export class PgConnImpl implements PgConn {
                     case 'NoticeResponse':
                         await this._options.onNotice(msg.fields)
                         break
-                    case 'NotificationResponse':
-                        await this._options.onNotification({channel: msg.channel, payload: msg.payload, sender: msg.sender})
+                    case 'NotificationResponse': {
+                        const channel = this._channels.get(msg.channel)
+                        if (!channel)
+                            break // unsubscribed before receiving notification
+                        if (!channel.subscribed.settled)
+                            break // notification from previous subscription, discard, there could be gaps
+                        const promises: Array<Promise<void>> = []
+                        for (const listener of channel.listeners) {
+                            promises.push(listener({ channel: msg.channel, payload: msg.payload, sender: msg.sender }))
+                        }
+                        // await, for pushback
+                        await Promise.all(promises)
                         break
+                    }
                     case 'BackendKeyData':
                         this.pid = msg.pid
                         this._secretKey = msg.secretKey
@@ -240,7 +268,7 @@ export class PgConnImpl implements PgConn {
 
         await this.reloadTypes()
     }
-    
+
     async reloadTypes() {
         await this._typeRegistry.reload()
     }
@@ -259,7 +287,7 @@ export class PgConnImpl implements PgConn {
         const rowDescOrNoData = assertType(await this._readSync(), ['RowDescription', 'NoData'])
         assert(rowDescOrNoData.type === 'RowDescription' || rowDescOrNoData.type === 'NoData')
         const columns = rowDescOrNoData.type === 'RowDescription' ? rowDescOrNoData.fields : []
-    
+
         return new PreparedStatementImpl(this, name, params, columns)
     }
 
@@ -273,9 +301,33 @@ export class PgConnImpl implements PgConn {
         const stmt = await this._prepare('', text, 'Flush')
         return await stmt._executeStreamingWithoutWaitingForTurn(params)
     }
-    
+
     async query(text: string, params?: any[]) {
         return (await this.queryStreaming(text, params)).buffer()
+    }
+
+    async addListener(channel: string, listener: NotificationListener): Promise<void> {
+        const existing = this._channels.get(channel)
+        if (!existing) {
+            assert(channel.match(/^[^\\"]+$/), 'Unsupported channel name') // todo: encoding
+            const subscribed = new Deferred<void>()
+            this._channels.set(channel, { listeners: new Set([listener]), subscribed })
+            await this.query(`LISTEN "${channel}"`)
+            subscribed.resolve()
+        } else {
+            assert(!existing.listeners.has(listener), 'Listener already added for channel.')
+            existing.listeners.add(listener)
+            return existing.subscribed
+        }
+    }
+
+    async removeListener(channel: string, listener: NotificationListener): Promise<void> {
+        const existing = this._channels.get(channel)
+        assert(existing && existing.listeners.delete(listener), 'Listener not added for channel.')
+        if (existing.listeners.size === 0) {
+            assert(this._channels.delete(channel))
+            await this.query(`UNLISTEN "${channel}"`)
+        }
     }
 
     close() {

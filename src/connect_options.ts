@@ -16,7 +16,7 @@ export interface ConnectPgOptions {
 
     /** When using transport `unix`, the filesystem path to the socket. */
     path?: string,
-    
+
     /** Username to use when connecting. Required. */
     username?: string
 
@@ -42,10 +42,6 @@ export interface ConnectPgOptions {
      *  Default implementation writes to `console.log`. */
     onNotice?: (notice: PgNotice) => Promise<void>
 
-    /** Notification received from server as a result of LISTEN.
-     *  Default implementation writes a reminder using `console.warn`. */
-    onNotification?: (n: Notification) => Promise<void>
-
     /** Log debugging messages using `console.log`.
      *  Default: false. */
     debug?: boolean
@@ -65,15 +61,12 @@ export function computeOptions(url: string | undefined, options: ConnectPgOption
         onNotice: async (notice: PgNotice) => {
             console.log(`${notice.severity}: ${notice.message}`)
         },
-        onNotification: async () => {
-            console.warn('Received notification, but no handler. Please pass `onNotification` option to `connectPg()`.')
-        },
         debug: false
     }
     const urlOptions = url ? parseDsn(url) : {}
     const effectiveOptions = { ...defaultOptions, ...urlOptions, ...options }
     assert(isPropertyDefined(effectiveOptions, 'username'), 'Username must be provided via `username` option or url.')
-    
+
     return effectiveOptions
 }
 
@@ -87,7 +80,7 @@ export function parseDsn(dsn: string): ConnectPgOptions {
         url = new URL('http' + dsn.slice('postgresql'.length))
     else
         throw new Error('Invalid DSN (must start with postgres:// or postgresql://): ' + dsn)
-  
+
     return {
         username: url.username || undefined,
         password: url.password || undefined,

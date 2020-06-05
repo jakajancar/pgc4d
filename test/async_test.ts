@@ -30,18 +30,19 @@ test('server-initiated disconnect', async () => {
 
 test('notifications work on same connection', async () => {
     const notifications: Notification[] = []
-    const db = await connectPg({
-        ...testOptions,
-        onNotification: async n => { notifications.push(n) }
-    })
+    const db = await connectPg(testOptions)
     try {
-        await db.query('LISTEN "my channel"')
-        await db.query(`NOTIFY "my channel", 'my message 1'`)
+        await db.addListener('my channel', async n => { notifications.push(n) })
+
+        // Using pg_notify
+        await db.query(`SELECT pg_notify($1, $2)`, ["my channel", 'my message 1'])
         assertEquals(notifications, [{
             channel: 'my channel',
             payload: 'my message 1',
             sender: db.pid
         }])
+
+        // Using NOTIFY
         await db.query(`NOTIFY "my channel", 'my message 2'`)
         assertEquals(notifications.length, 2)
     } finally {
@@ -51,15 +52,11 @@ test('notifications work on same connection', async () => {
 
 test('notifications work across connections', async () => {
     let notification = new Deferred<Notification>()
-    const listener = await connectPg({
-        ...testOptions,
-        onNotification: async n => { notification.resolve(n) }
-    })
+    const listener = await connectPg(testOptions)
     try {
+        await listener.addListener('my channel', async n => { notification.resolve(n) })
         const notifier = await connectPg(testOptions)
         try {
-            await listener.query('LISTEN "my channel"')
-
             // Notification from another connection
             await notifier.query(`NOTIFY "my channel", 'message from notifier 1'`)
             assertEquals(await notification, {
@@ -84,25 +81,67 @@ test('notifications work across connections', async () => {
     }
 })
 
-test('notifications warn if no handler', async () => {
-    let notified = false
-    const orig = console.warn
-    console.warn = (...args: unknown[]): void => {
-        if (args[0] === 'Received notification, but no handler. Please pass `onNotification` option to `connectPg()`.')
-            notified = true
-        else
-            orig(...args)
-    }
+test('notifications work with multiple listeners', async () => {
+    const notifications1: Notification[] = []
+    const notifications2: Notification[] = []
+    const db = await connectPg(testOptions)
     try {
-        const db = await connectPg(testOptions)
-        try {
-            await db.query('LISTEN "my channel"')
-            await db.query(`NOTIFY "my channel", 'my message 1'`)
-            assert(notified)
-        } finally {
-            db.close()
-        }
+        // add two
+        const listener1 = async (n: Notification) => { notifications1.push(n) }
+        const listener2 = async (n: Notification) => { notifications2.push(n) }
+        const listener3 = async (n: Notification) => { assert(false, 'not expected') }
+        await db.addListener('my channel', listener1)
+        await db.addListener('my channel', listener2)
+        await db.addListener('my channel2', listener3)
+        assertEquals((await db.query(`SELECT * FROM pg_listening_channels()`)).column, ['my channel', 'my channel2'])
+
+        await db.query(`NOTIFY "my channel", 'my message 1'`)
+        assertEquals(notifications1.length, 1)
+        assertEquals(notifications2.length, 1)
+
+        // remove first
+        await db.removeListener('my channel', listener1)
+        assertEquals((await db.query(`SELECT * FROM pg_listening_channels()`)).column, ['my channel', 'my channel2'])
+
+        await db.query(`NOTIFY "my channel", 'my message 2'`)
+        assertEquals(notifications1.length, 1)
+        assertEquals(notifications2.length, 2)
+
+        // remove second
+        await db.removeListener('my channel', listener2)
+        assertEquals((await db.query(`SELECT * FROM pg_listening_channels()`)).column, ['my channel2'])
+
+        await db.query(`NOTIFY "my channel", 'my message 3'`)
+        assertEquals(notifications1.length, 1)
+        assertEquals(notifications2.length, 2)
     } finally {
-        console.warn = orig
+        db.close()
+    }
+})
+
+test('notifications not received after unsubscribed, before re-subscribed', async () => {
+    const notifications1: Notification[] = []
+    const notifications2: Notification[] = []
+    const listener1 = async (n: Notification) => { notifications1.push(n) }
+    const listener2 = async (n: Notification) => { notifications2.push(n) }
+
+    const db = await connectPg(testOptions)
+    try {
+        // subscribe
+        await db.addListener('my channel', listener1)
+
+        // notify, but replace listener before really sent
+        const notified = db.query(`NOTIFY "my channel", 'my message 1'`)
+        const listener1Removed = db.removeListener('my channel', listener1)
+        const listener2Added = db.addListener('my channel', listener2)
+
+        await notified
+        await listener1Removed
+        await listener2Added
+
+        assertEquals(notifications1.length, 0, `Listener 1 received message after unsubscribing`)
+        assertEquals(notifications2.length, 0, `Listener 2 received message for previous LISTEN, before it's own LISTEN was executed`)
+    } finally {
+        db.close()
     }
 })
