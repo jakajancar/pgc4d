@@ -24,6 +24,8 @@ export const textrecv: RecvFunc = (array: Uint8Array) => {
     return decode(array)
 }
 
+export const [varcharsend, varcharrecv] = [textsend, textrecv]
+export const [bpcharsend, bpcharrecv] = [textsend, textrecv]
 export const [namesend, namerecv] = [textsend, textrecv]
 export const [enum_send, enum_recv] = [textsend, textrecv]
 
@@ -236,7 +238,7 @@ export const record_recv: TypeAwareRecvFunc = (array, type, typeRegistry) => {
         try {
             const elemType = view.getInt32(offset); offset += 4
             assert(elemType === type.attrtypids[i])
-            
+
             const length = view.getInt32(offset); offset += 4
             if (length === -1) {
                 value.push(null)

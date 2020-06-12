@@ -46,6 +46,10 @@ testType('oid',         '1',                        1)
 testType('text',        null,                       null)
 testType('text',        'hello',                    'hello')
 testType('text[]',      '{hello,there}',            ['hello', 'there'])
+testType('varchar',     'hello',                    'hello')
+testType('varchar[]',   '{hello,there}',            ['hello', 'there'])
+testType('char',        'h',                        'h')
+testType('char(5)[]',   '{hello,there}',            ['hello', 'there'])
 testType('timestamp',   '2009-02-13 23:31:30',      new Date(1234567890*1000))
 testType('timestamp[]', '{"2009-02-13 23:31:30"}',  [new Date(1234567890*1000)])
 testType('timestamptz', '2009-02-13 23:31:30+00',   new Date(1234567890*1000))
@@ -100,6 +104,19 @@ test(`sending an unsupported type`, async () => {
         unreachable()
     } catch (e) {
         assertEquals(e.message, 'Error sending param $1: Unsupported type: regconfig (oid 3734, typsend regconfigsend)')
+    } finally {
+        db.close()
+    }
+})
+
+test(`sending and receiving bpchars of incorrect lengths`, async () => {
+    const db = await connectPg(testOptions)
+    try {
+        assertEquals((await db.query(`SELECT 'too long'::char(5)`, [])).value, 'too l')
+        assertEquals((await db.query(`SELECT $1::char(5)`, ['too long'])).value, 'too l')
+
+        assertEquals((await db.query(`SELECT 'shrt'::char(5)`, [])).value, 'shrt ')
+        assertEquals((await db.query(`SELECT $1::char(5)`, ['shrt'])).value, 'shrt ')
     } finally {
         db.close()
     }
