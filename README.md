@@ -25,6 +25,13 @@ A full-featured PostgreSQL client for [Deno](https://deno.land) including suppor
   - Arrays, record types and user-defined types (enums)
   - Concurrent queries (queueing)
 
+Philosophical differences from [deno-postgres](https://github.com/deno-postgres/deno-postgres):
+
+  - Does not aim for API compatibility with Node's `node-postgres`
+  - Uses only binary value encoding in client <> server communication
+  - No magic detection of data types (is `[1, 2, 3]` an `int[]` or a `json` value?) - see [bugs](https://github.com/brianc/node-postgres/issues/442)
+  - Strict layering of protocol and logic layers - see [the interface](src/message_types.ts)
+
 (* currently requires `--unstable` in Deno)
 
 ## Usage
