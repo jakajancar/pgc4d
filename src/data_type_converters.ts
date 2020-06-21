@@ -82,16 +82,31 @@ export const bytearecv: RecvFunc = (array: Uint8Array) => {
     return array
 }
 
+const postgresEpoch = 946684800000 // 2000 -> 1970
+
 export const timestamp_send: SendFunc = (value: unknown) =>{
     assert(value instanceof Date, `Expected Date, got ${debugValueDesc(value)}`)
-    return int8send((value.getTime() - 946684800000) * 1000)
+    return int8send((value.getTime() - postgresEpoch) * 1000)
 }
 
 export const timestamp_recv: RecvFunc = (array: Uint8Array) => {
-    return new Date(Number(int8recv(array)/1000n) + 946684800000) // 2000 -> 1970
+    return new Date(Number(int8recv(array)/1000n) + postgresEpoch)
 }
 
 export const [timestamptz_send, timestamptz_recv] = [timestamp_send, timestamp_recv]
+
+export const date_send: SendFunc = (value: unknown) =>{
+    assert(typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}$/), `Expected string with format yyyy-MM-dd, got ${debugValueDesc(value)}`)
+    const date = new Date(value + 'T00:00:00.000Z')
+    return int4send((date.getTime() - postgresEpoch) / 1000 / 60 / 60 / 24)
+}
+
+export const date_recv: RecvFunc = (array: Uint8Array) => {
+    const date = new Date(int4recv(array) * 24 * 60 * 60 * 1000 + postgresEpoch)
+    const [dateString, timeString] = date.toISOString().split('T')
+    assert(timeString === '00:00:00.000Z')
+    return dateString
+}
 
 export const json_send: SendFunc = (value: unknown) => {
     return encode(JSON.stringify(value))
