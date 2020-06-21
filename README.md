@@ -52,7 +52,7 @@ try {
 
 [API documentation](https://doc.deno.land/https/raw.githubusercontent.com/jakajancar/pgc4d/master/src/mod.ts)
 
-[Manual](https://github.com/jakajancar/pgc4d/wiki)
+[Manual](https://github.com/jakajancar/pgc4d/wiki/Getting-started)
 
 ## Contributing
 
