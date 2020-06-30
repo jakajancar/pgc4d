@@ -35,7 +35,13 @@ export class PreparedStatementImpl {
 
     // takes ownership of conn, does not wait for turn
     async _executeStreamingWithoutWaitingForTurn(params: ColumnValue[] = []): Promise<StreamingQueryResult> {
-        const paramValues = this._serializeParams(params)
+        let paramValues
+        try {
+            paramValues = this._serializeParams(params)
+        } catch (e) {
+            await this._db._write([{ type: 'Sync' }])
+            throw e
+        }
         await this._db._write([
             { type: 'Bind', dstPortal: '', srcStatement: this._name, paramFormats: [Format.Binary], paramValues, resultFormats: [Format.Binary] },
             { type: 'Execute', portal: '', maxRows: 0 },
@@ -98,7 +104,7 @@ export class PreparedStatementImpl {
     private _serializeParams(values: ColumnValue[]): Array<Uint8Array|null> {
         if (values.length !== this.params.length)
             throw new Error(`Statement requires ${this.params.length} params, ${values.length} passed.`)
-            
+
         return values.map((value, i) => {
             try {
                 if (value === null)

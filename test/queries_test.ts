@@ -52,7 +52,7 @@ test('query rejects informatively', async () => {
     })
 })
 
-test('query after failed query', async () => {
+test('query after failed query (server-side error)', async () => {
     await withConnection(testOptions, async db => {
         try {
             await db.query('SELEKT 42')
@@ -60,6 +60,21 @@ test('query after failed query', async () => {
         } catch (e) {
             assert(e instanceof PgError)
             assertStrContains(e.message, 'SELEKT')
+        }
+
+        const result = await db.query('SELECT 42')
+        assertEquals(result.value, 42)
+    })
+})
+
+test('query after failed query (client-side error)', async () => {
+    await withConnection(testOptions, async db => {
+        try {
+            await db.query('SELECT $1::int', ['not a number'])
+            unreachable()
+        } catch (e) {
+            assert(e instanceof Error)
+            assertStrContains(e.message, 'Error sending param $1: Expected number, got string')
         }
 
         const result = await db.query('SELECT 42')
