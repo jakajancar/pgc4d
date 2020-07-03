@@ -213,10 +213,6 @@ export class PgConnImpl implements PgConn {
                         await Promise.all(promises)
                         break
                     }
-                    case 'BackendKeyData':
-                        this.pid = msg.pid
-                        this._secretKey = msg.secretKey
-                        break
                     default:
                         if (msg.type === 'ErrorResponse' && (msg.fields.severity === 'FATAL' || msg.fields.severity === 'PANIC')) {
                             this.done.resolve(new PgError(msg.fields))
@@ -263,12 +259,14 @@ export class PgConnImpl implements PgConn {
             }
         }
 
+        const bkd = await lock.read(['BackendKeyData'])
+        this.pid = bkd.pid
+        this._secretKey = bkd.secretKey
+
         await lock.read(['ReadyForQuery'])
-        lock.release()
-        assert(this.pid !== undefined)
-        assert(this._secretKey !== undefined)
         assert(this.serverParams.get('integer_datetimes') === 'on')
         assert(this.serverParams.get('client_encoding') === 'UTF8')
+        lock.release()
 
         await this.reloadTypes()
     }
