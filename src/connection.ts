@@ -105,6 +105,50 @@ export async function connectPg(...args: any[]): Promise<PgConn>
 
 const CLOSED_BEFORE_FINISHED_TEXT = 'Connection closed before query finished.'
 
+export class Lock {
+    private clean = true
+    constructor(private readonly conn: PgConnImpl) {}
+
+    async write(msgs: ClientMessage[], sync: boolean = false): Promise<void> {
+        this.clean = false
+        try {
+            for (const msg of msgs) {
+                if (this.conn._options.debug)
+                    console.debug('pg < ' + JSON.stringify(msg))
+                await writeMessage(this.conn._writer, msg)
+            }
+            await this.conn._writer.flush()
+        } catch (e) {
+            if (e instanceof Deno.errors.BadResource)
+                throw new Error(CLOSED_BEFORE_FINISHED_TEXT)
+            throw e
+        }
+    }
+
+    /** If an error is received, an exception will be thrown and the lock released. */
+    async read<M extends ServerMessage, T extends M['type']>(types: T[]): Promise<M extends { type: T } ? M : never> {
+        if (this.conn.done.settled)
+            throw new Error(CLOSED_BEFORE_FINISHED_TEXT)
+        const msg = await this.conn._syncMessage.read()
+        if (msg.type === 'ErrorResponse') {
+            if (msg.fields.severity !== 'FATAL' && msg.fields.severity !== 'PANIC') {
+                await this.read(['ReadyForQuery'])
+                this.release()
+            }
+            throw new PgError(msg.fields)
+        } else {
+            this.clean = msg.type === 'ReadyForQuery'
+            assert((types as string[]).includes(msg.type), `Expected ${types}, got ${msg.type}`)
+            return msg as any
+        }
+    }
+
+    release(): void {
+        assert(this.clean, 'Releasing lock while connection is not in a clean state.')
+        this.conn._locks.write(this)
+    }
+}
+
 export class PgConnImpl implements PgConn {
     constructor(
         readonly _options: ReturnType<typeof computeOptions>,
@@ -112,7 +156,7 @@ export class PgConnImpl implements PgConn {
     ) {
         this.done.finally(() => {
             // Reject any queries
-            for (const promise of this._turns.reads)
+            for (const promise of this._locks.reads)
                 promise.reject(new Error(CLOSED_BEFORE_FINISHED_TEXT))
             for (const promise of this._syncMessage.reads)
                 promise.reject(new Error(CLOSED_BEFORE_FINISHED_TEXT))
@@ -128,8 +172,7 @@ export class PgConnImpl implements PgConn {
     readonly _writer: BufWriter = new BufWriter(this._conn)
     readonly _reader: BufReader = new BufReader(this._conn)
     readonly _syncMessage = new Pipe<ServerMessage>()
-    readonly _turns = new Pipe<void>()
-    readonly _firstReadyForQuery = new Deferred<void>()
+    readonly _locks = new Pipe<Lock>()
     readonly _typeRegistry = new TypeRegistry(this)
     readonly _started: Promise<void>
     pid!: number         // set after _started
@@ -142,37 +185,13 @@ export class PgConnImpl implements PgConn {
 
     readonly done = new Deferred<Error | undefined>()
 
-    // Write a message
-    async _write(msgs: ClientMessage[]): Promise<void>
-    {
-        try {
-            for (const msg of msgs) {
-                if (this._options.debug)
-                    console.debug('pg < ' + JSON.stringify(msg))
-                await writeMessage(this._writer, msg)
-            }
-            await this._writer.flush()
-        } catch (e) {
-            if (e instanceof Deno.errors.BadResource && this.done.settled)
-                throw new Error(CLOSED_BEFORE_FINISHED_TEXT)
-            throw e
-        }
-    }
-
-    // Read a message
-    // (only the read loop should use this directly, you probably should use `_readSync()`)
-    async _read(): Promise<ServerMessage> {
-        const msg = await readMessage(this._reader)
-        if (this._options.debug)
-            console.debug('pg > ' + JSON.stringify(msg))
-        return msg
-    }
-
     // Keep reading messages, handling async ones, pushing sync ones to this._syncMessage
     async _runReadLoop() {
         try {
             while (this.done.pending) {
-                const msg = await this._read()
+                const msg = await readMessage(this._reader)
+                if (this._options.debug)
+                    console.debug('pg > ' + JSON.stringify(msg))
                 switch (msg.type) {
                     case 'ParameterStatus':
                         this.serverParams.set(msg.name, msg.value)
@@ -198,69 +217,54 @@ export class PgConnImpl implements PgConn {
                         this.pid = msg.pid
                         this._secretKey = msg.secretKey
                         break
-                    case 'ReadyForQuery':
-                        this._firstReadyForQuery.resolve()
-                        this._turns.write()
-                        break
                     default:
                         if (msg.type === 'ErrorResponse' && (msg.fields.severity === 'FATAL' || msg.fields.severity === 'PANIC')) {
                             this.done.resolve(new PgError(msg.fields))
                         }
-
                         // await, to buffer at most one
                         await this._syncMessage.write(msg)
                 }
             }
         } catch (e) {
-            this._firstReadyForQuery.reject(e)
             this.done.resolve(e)
         }
     }
 
-    // Read a *non-async* message. Throws on error.
-    async _readSync(): Promise<ServerMessage> {
-        const msg = await this._syncMessage.read()
-        if (msg.type === 'ErrorResponse') {
-            if (msg.fields.severity !== 'FATAL' && msg.fields.severity !== 'PANIC')
-                await this._write([{ type: 'Sync' }])
-            throw new PgError(msg.fields)
-        }
-        return msg
-    }
-
     async _start() {
+        // We create the (single) lock that is then passed around in this._locks
+        const lock = new Lock(this)
+
         const params = new Map(Object.entries({
             user: this._options.username,
             database: this._options.database,
             ...this._options.connectionParams
         }).filter(([_, v]) => v !== undefined)) as Map<string,string>
-        await this._write([{ type: 'StartupMessage', params}])
+        await lock.write([{ type: 'StartupMessage', params}])
 
         authentication:
         while (true) {
-            const msg = await this._readSync()
+            const msg = await lock.read(['AuthenticationCleartextPassword', 'AuthenticationMD5Password', 'AuthenticationOk'])
             switch (msg.type) {
                 case 'AuthenticationCleartextPassword': {
                     if (!this._options.password)
                         throw new Error('Password required but not provided.')
-                    await this._write([{ type: 'PasswordMessage', password: this._options.password }])
+                    await lock.write([{ type: 'PasswordMessage', password: this._options.password }])
                     break
                 }
                 case 'AuthenticationMD5Password': {
                     if (!this._options.password)
                         throw new Error('Password required but not provided.')
                     const hash = hashMd5Password(this._options.password, this._options.username, msg.salt)
-                    await this._write([{ type: 'PasswordMessage', password: hash }])
+                    await lock.write([{ type: 'PasswordMessage', password: hash }])
                     break
                 }
                 case 'AuthenticationOk':
                     break authentication
-                default:
-                    throw new Error(`Unexpected message: ${msg.type}`)
             }
         }
 
-        await this._firstReadyForQuery
+        await lock.read(['ReadyForQuery'])
+        lock.release()
         assert(this.pid !== undefined)
         assert(this._secretKey !== undefined)
         assert(this.serverParams.get('integer_datetimes') === 'on')
@@ -273,36 +277,38 @@ export class PgConnImpl implements PgConn {
         await this._typeRegistry.reload()
     }
 
-    async _prepare(name: string, text: string, flushCommand: 'Sync' | 'Flush') {
-        await this._write([
+    async _prepare(lock: Lock, name: string, text: string) {
+        await lock.write([
             { type: 'Parse', dstStatement: name, query: text, paramTypes: [] },
             { type: 'Describe', what: 'statement', name },
-            { type: flushCommand },
+            { type: 'Sync' },
         ])
-        assertType(await this._readSync(), ['ParseComplete'])
+        await lock.read(['ParseComplete'])
 
-        const paramDesc = assertType(await this._readSync(), ['ParameterDescription'])
+        const paramDesc = await lock.read(['ParameterDescription'])
         const params = paramDesc.typeOids.map(typeOid => ({ typeOid }))
 
-        const rowDescOrNoData = assertType(await this._readSync(), ['RowDescription', 'NoData'])
-        assert(rowDescOrNoData.type === 'RowDescription' || rowDescOrNoData.type === 'NoData')
+        const rowDescOrNoData = await lock.read(['RowDescription', 'NoData'])
         const columns = rowDescOrNoData.type === 'RowDescription' ? rowDescOrNoData.fields : []
 
+        await lock.read(['ReadyForQuery'])
         return new PreparedStatementImpl(this, name, params, columns)
     }
 
     async prepare(text: string) {
-        await this._turns.read()
-        return this._prepare(`pgc4d_${this._stmtCounter++}`, text, 'Sync')
+        const lock = await this._locks.read()
+        const stmt = await this._prepare(lock, `pgc4d_${this._stmtCounter++}`, text)
+        lock.release()
+        return stmt
     }
 
-    async queryStreaming(text: string, params: any[] = []) {
-        await this._turns.read()
-        const stmt = await this._prepare('', text, 'Flush')
-        return await stmt._executeStreamingWithoutWaitingForTurn(params)
+    async queryStreaming(text: string, params: ColumnValue[] = []) {
+        const lock = await this._locks.read()
+        const stmt = await this._prepare(lock, '', text)
+        return await stmt._executeStreamingConsumingExistingLock(lock, params)
     }
 
-    async query(text: string, params?: any[]) {
+    async query(text: string, params?: ColumnValue[]) {
         return (await this.queryStreaming(text, params)).buffer()
     }
 
@@ -334,15 +340,6 @@ export class PgConnImpl implements PgConn {
         this.done.resolve()
     }
 
-}
-
-/** Reads a message of a specific type of a response stream */
-export function assertType<M extends ServerMessage, T extends M['type']>(
-    msg: ServerMessage,
-    types: T[]
-): M extends { type: T } ? M : never {
-    assert((types as string[]).includes(msg.type), `Expected ${types}, got ${msg.type}`)
-    return msg as any
 }
 
 async function startTlsPostgres(conn: Deno.Conn, options: { hostname: string, certFile?: string }): Promise<Deno.Conn> {

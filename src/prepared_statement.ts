@@ -1,5 +1,5 @@
 import { Format } from './message_types.ts'
-import { PgConnImpl, assertType } from './connection.ts'
+import { PgConnImpl, Lock } from './connection.ts'
 import { ParameterMetadata, ColumnMetadata, ColumnValue, IndexedRow } from './types.ts'
 import { assert } from './deps.ts'
 import { StreamingQueryResult, BufferedQueryResult, CompletionInfo } from './query_result.ts'
@@ -29,33 +29,33 @@ export class PreparedStatementImpl {
     }
 
     async executeStreaming(params: ColumnValue[] = []): Promise<StreamingQueryResult> {
-        await this._db._turns.read()
-        return await this._executeStreamingWithoutWaitingForTurn(params)
+        const lock = await this._db._locks.read()
+        return await this._executeStreamingConsumingExistingLock(lock, params)
     }
 
     // takes ownership of conn, does not wait for turn
-    async _executeStreamingWithoutWaitingForTurn(params: ColumnValue[] = []): Promise<StreamingQueryResult> {
+    async _executeStreamingConsumingExistingLock(lock: Lock, params: ColumnValue[] = []): Promise<StreamingQueryResult> {
         let paramValues
         try {
             paramValues = this._serializeParams(params)
         } catch (e) {
-            await this._db._write([{ type: 'Sync' }])
+            lock.release()
             throw e
         }
-        await this._db._write([
+        await lock.write([
             { type: 'Bind', dstPortal: '', srcStatement: this._name, paramFormats: [Format.Binary], paramValues, resultFormats: [Format.Binary] },
             { type: 'Execute', portal: '', maxRows: 0 },
             { type: 'Sync' },
         ])
-        assertType(await this._db._readSync(), ['BindComplete'])
-        return new StreamingQueryResult(this.columns, this._createRowsIteratorFromResponse())
+        await lock.read(['BindComplete'])
+        return new StreamingQueryResult(this.columns, this._createRowsIteratorFromResponse(lock))
     }
 
-    private async * _createRowsIteratorFromResponse(): AsyncGenerator<IndexedRow, CompletionInfo> {
+    private async * _createRowsIteratorFromResponse(lock: Lock): AsyncGenerator<IndexedRow, CompletionInfo> {
         let completed = false
         try {
             while (true) {
-                const msg = await this._db._readSync()
+                const msg = await lock.read(['DataRow', 'CommandComplete'])
                 switch (msg.type) {
                     case 'DataRow':
                         yield this._parseRow(msg.values)
@@ -82,23 +82,26 @@ export class PreparedStatementImpl {
         } finally {
             if (!completed) {
                 // drain so next query can run
-                while (this._db.done.pending) {
-                    const msg = await this._db._readSync()
+                while (true) {
+                    const msg = await lock.read(['DataRow', 'CommandComplete'])
                     if (msg.type === 'CommandComplete')
                         break
                 }
             }
-
+            await lock.read(['ReadyForQuery'])
+            lock.release()
         }
     }
 
     async close(): Promise<void> {
-        await this._db._turns.read()
-        await this._db._write([
+        const lock = await this._db._locks.read()
+        await lock.write([
             { type: 'Close', what: 'statement', name: this._name },
             { type: 'Sync'},
         ])
-        assertType(await this._db._readSync(), ['CloseComplete'])
+        await lock.read(['CloseComplete'])
+        await lock.read(['ReadyForQuery'])
+        lock.release()
     }
 
     private _serializeParams(values: ColumnValue[]): Array<Uint8Array|null> {
