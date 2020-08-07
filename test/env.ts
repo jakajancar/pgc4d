@@ -11,12 +11,12 @@ const certFile = new URL('rootCA.pem', import.meta.url).pathname
 /**
  * To run tests, you need to have a PostgreSQL instance at postgres:5433,
  * configured with SSL and a bunch of predefined users to test authentication.
- * 
+ *
  * You can prepare it yourself, or you can use Docker and the 'postgres'
  * service defined in `docker-compose.yml`. Either way, you need to use
  * /etc/hosts to point to the IP, unless you're running the tests within
  * Docker as well.
- * 
+ *
  * For the exact list of requirements for the test database, see
  * `docker/postgres/*`, particularly `pg_hba.conf`.
  */
@@ -49,8 +49,10 @@ export const connMethodTestOptions: Record<string, ConnectPgOptions> = {
     hostssl:   { hostname: 'postgres', port: 5433, certFile,           database: 'pgc4d', username: 'pgc4d_hostssl',     password: 'pgc4d_hostssl_pass' },
     hostnossl: { hostname: 'postgres', port: 5433, sslMode: 'disable', database: 'pgc4d', username: 'pgc4d_hostnossl',   password: 'pgc4d_hostnossl_pass' },
 }
-if (skipUnstable)
+if (skipUnstable) {
+    delete connMethodTestOptions['local']
     delete connMethodTestOptions['hostssl']
+}
 if (skipUnix)
     delete connMethodTestOptions['local']
 
