@@ -1,5 +1,5 @@
 const { test } = Deno
-import { assertEquals, assertStrContains, unreachable, assert } from '../src/deps.ts'
+import { assertEquals, assertStringContains, unreachable, assert } from '../src/deps.ts'
 import { PgError } from '../src/types.ts'
 import { ConnectPgOptions } from '../src/connect_options.ts'
 import { connectPg, PgConn } from '../src/connection.ts'
@@ -45,9 +45,9 @@ test('query rejects informatively', async () => {
         } catch (e) {
             // console.log('test case caught: ', e)
             assert(e instanceof PgError)
-            assertStrContains(e.message, 'syntax error', 'should type')
-            assertStrContains(e.message, 'SELEKT', 'should contain relevant keyword')
-            assertStrContains(e.stack!, 'queries_test.ts', 'should contain caller')
+            assertStringContains(e.message, 'syntax error', 'should type')
+            assertStringContains(e.message, 'SELEKT', 'should contain relevant keyword')
+            assertStringContains(e.stack!, 'queries_test.ts', 'should contain caller')
         }
     })
 })
@@ -59,7 +59,7 @@ test('query after failed query (server-side error)', async () => {
             unreachable()
         } catch (e) {
             assert(e instanceof PgError)
-            assertStrContains(e.message, 'SELEKT')
+            assertStringContains(e.message, 'SELEKT')
         }
 
         const result = await db.query('SELECT 42')
@@ -74,7 +74,7 @@ test('query after failed query (client-side error)', async () => {
             unreachable()
         } catch (e) {
             assert(e instanceof Error)
-            assertStrContains(e.message, 'Error sending param $1: Expected number, got string')
+            assertStringContains(e.message, 'Error sending param $1: Expected number, got string')
         }
 
         const result = await db.query('SELECT 42')

@@ -1,5 +1,5 @@
 const { test } = Deno
-import { assertEquals, assertStrContains, assert } from '../src/deps.ts'
+import { assertEquals, assertStringContains, assert } from '../src/deps.ts'
 import { Notification, PgError } from '../src/types.ts'
 import { connectPg } from '../src/connection.ts'
 import { Deferred } from '../src/utils.ts'
@@ -19,7 +19,7 @@ test('server-initiated disconnect', async () => {
             await killer.query('SELECT pg_terminate_backend($1)', [victim.pid])
             await victim.done
             assert(victimError instanceof PgError)
-            assertStrContains(victimError.message, 'terminating connection due to administrator command')
+            assertStringContains(victimError.message, 'terminating connection due to administrator command')
         } finally {
             victim.close()
         }

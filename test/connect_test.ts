@@ -2,7 +2,7 @@ const { test } = Deno
 import { connectPg, PgConn } from '../src/connection.ts'
 import { PgError } from '../src/types.ts'
 import { testOptions, connMethodTestOptions, authMethodTestOptions } from './env.ts'
-import { assertEquals, assertStrContains, unreachable, assert } from '../src/deps.ts'
+import { assertEquals, assertStringContains, unreachable, assert } from '../src/deps.ts'
 
 for (const [method, options] of Object.entries(connMethodTestOptions)) {
     test(`connection method ${method}`, async () => {
@@ -40,7 +40,7 @@ test('wrong password', async () => {
     } catch (e) {
         assert(e instanceof PgError)
         assertEquals(e.message, `password authentication failed for user "pgc4d"`)
-        assertStrContains(e.stack!, 'connect_test.ts')
+        assertStringContains(e.stack!, 'connect_test.ts')
     }
 })
 
