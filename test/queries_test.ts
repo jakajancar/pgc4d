@@ -192,6 +192,21 @@ test('numAffectedRows works for streaming queries', async () => {
     })
 })
 
+test('query rejects on constraint violation', async () => {
+    await withConnection(testOptions, async db => {
+        await db.query(`DROP TABLE IF EXISTS constrainedtable`)
+        await db.query(`CREATE TABLE constrainedtable (i int primary key)`)
+        await db.query(`INSERT INTO constrainedtable (i) VALUES (0)`)
+        // should reject promise, not hang indefinitely
+        try {
+            await db.query(`INSERT INTO constrainedtable (i) VALUES (0)`)
+            unreachable()
+        } catch (e) {
+            assert(e instanceof PgError)
+        }
+    })
+})
+
 async function withConnection<T>(options: ConnectPgOptions, f: (db: PgConn) => T): Promise<T> {
     const db = await connectPg(options)
     try {
