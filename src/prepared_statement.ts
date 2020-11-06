@@ -53,6 +53,7 @@ export class PreparedStatementImpl {
 
     private async * _createRowsIteratorFromResponse(lock: Lock): AsyncGenerator<IndexedRow, CompletionInfo> {
         let completed = false
+        let errored = false
         try {
             while (true) {
                 const msg = await lock.read(['DataRow', 'CommandComplete'])
@@ -79,17 +80,22 @@ export class PreparedStatementImpl {
                         }
                 }
             }
+        } catch (err) {
+            errored = true
+            throw err
         } finally {
-            if (!completed) {
-                // drain so next query can run
-                while (true) {
-                    const msg = await lock.read(['DataRow', 'CommandComplete'])
-                    if (msg.type === 'CommandComplete')
-                        break
+            if (!errored) {
+                if (!completed) {
+                    // drain so next query can run
+                    while (true) {
+                        const msg = await lock.read(['DataRow', 'CommandComplete'])
+                        if (msg.type === 'CommandComplete')
+                            break
+                    }
                 }
+                await lock.read(['ReadyForQuery'])
+                lock.release()
             }
-            await lock.read(['ReadyForQuery'])
-            lock.release()
         }
     }
 
