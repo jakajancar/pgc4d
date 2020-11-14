@@ -1,28 +1,31 @@
-export {
+export type {
     ConnectPgOptions,
 } from './connect_options.ts'
 
 export {
-    connectPg,
+    connectPg
+} from './connection.ts'
+
+export type {
     PgConn,
 } from './connection.ts'
 
-export {
+export type {
     ErrorAndNoticeFields,
 } from './message_types.ts'
 
-export {
+export type {
     PreparedStatement,
 } from './prepared_statement.ts'
 
-export {
+export type {
     CompletionInfo,
     QueryResult,
     StreamingQueryResult,
     BufferedQueryResult,
 } from './query_result.ts'
 
-export {
+export type {
     Notification,
     PgError,
     PgNotice,
